@@ -3726,7 +3726,7 @@ const NAME_WRAP_LINE = { tablet:1542, iphone:1122, android:1122, feature:420, qr
 const NAME_LINE_HEIGHT = 1.2, NAME_LETTER_SPACING = 0;   // same on every screenshot
 const NAME_SIZE = { iphone:180, android:180, tablet:220, feature:60, qr:33.5 };   // QR: 33.5pt, as in both promote.pdf references   // fixed; long names wrap or shrink automatically
 const _wrapCtx = document.createElement('canvas').getContext('2d');
-function wrapName(rows, fs, weight, lsEm, maxW, maxLines, minK) {
+function wrapName(rows, fs, weight, lsEm, maxW, maxLines, minK, saveLine) {
   // where the last letter's ink ends (not the advance width), as seen against the wrap line
   const width = (t, f) => { _wrapCtx.font = `${weight} ${f}px Poppins, Inter, sans-serif`; return _wrapCtx.measureText(t).actualBoundingBoxRight + lsEm * f * Math.max(0, [...t].length - 1); };
   rows = rows.map(r => r.trim()).filter(Boolean);
@@ -3748,6 +3748,12 @@ function wrapName(rows, fs, weight, lsEm, maxW, maxLines, minK) {
   // long names: at most maxLines lines — shrink step by step (never below minK of the normal size)
   if (maxLines) { const fMin = fs * (minK || 0.7);
     while (out.length > maxLines && f > fMin) { f = Math.max(fMin, Math.floor(f * 0.97 * 10) / 10); out = wrapAt(f); } }
+  // "save a line": a name on 3+ lines shrinks just enough to fit on one line fewer (all lines the same size),
+  // never below 50% of the normal size and never below 2 lines
+  if (saveLine && out.length >= 3) {
+    const target = out.length - 1, fMin2 = fs * 0.5; let g = f;
+    while (g > fMin2) { g = Math.max(fMin2, Math.floor(g * 0.99 * 10) / 10); const t = wrapAt(g); if (t.length <= target) { out = t; f = g; break; } }
+  }
   return { lines: out, fs: f };
 }
 // One line only: shrink to fit (never below minK of the size), then end with "…" if it still doesn't fit
@@ -4138,7 +4144,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
                : { nl:125, nt:185, bl:121, bb:151, bfs:74 };
       overlay = `<div style="position:absolute;left:${S(T1.nl)}px;top:${S(T1.nt - (NAME_LINE_HEIGHT - 1.1) / 2 * nameFs)}px;z-index:3;text-align:left;">
           ${(() => { const ls = NAME_LETTER_SPACING;
-                     const W = wrapName(lines, nameFs, 600, ls, NAME_WRAP_LINE[layout] - T1.nl, 3);
+                     const W = wrapName(lines, nameFs, 600, ls, NAME_WRAP_LINE[layout] - T1.nl, 3, 0.7, true);
                      return W.lines.map(l => `<div style="${PSB}font-size:${S(W.fs)}px;color:white;line-height:${NAME_LINE_HEIGHT};letter-spacing:${ls}em;text-align:left;white-space:nowrap;">${l}</div>`).join(''); })()}
         </div>
         <div style="position:absolute;left:${S(T1.bl)}px;bottom:${S(T1.bb)}px;z-index:3;
