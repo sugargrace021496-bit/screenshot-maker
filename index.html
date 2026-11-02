@@ -2960,7 +2960,7 @@ function previewSize() {
 // Logo centring: find the logo design, then place it in the middle of a square of its own background colour
 // so it fills 78% (equal space on every side). See-through logos stay see-through. Logos with no plain
 // background (e.g. a full-bleed photo) are left as they are.
-const LOGO_CENTRE_FILL = 0.78;
+const LOGO_CENTRE_FILL = 0.75;   // logos are centred so their design fills 75% of the square
 async function centreLogo(src) {
   try {
     const im = await _loadImg(src), W = im.naturalWidth, H = im.naturalHeight;
@@ -3153,9 +3153,10 @@ async function migrateGymFolder(oldName, newName) {
 let libraryOpenGym = null;   // null = folder list; else = the client folder being viewed
 
 // Apply a saved asset (logo / background) to the Design tab.
-function applyLibraryAsset(kind, data) {
+async function applyLibraryAsset(kind, data) {
   if (!data) return;
   if (kind === 'logo') {
+    data = await centreLogo(data);   // saved logos are re-centred at the current size (75%)
     imgData.featureIcon = data;
     if ($('feat-icon-thumb')) { $('feat-icon-thumb').src=data; $('feat-icon-thumb').style.display='block'; }
     if ($('feat-icon-clear')) $('feat-icon-clear').style.display='inline-block';
@@ -3467,7 +3468,7 @@ function logoMeta(src) {
   return null;
 }
 // The logo's design (circle, letters, mark) fills 77.6% of its white tile — as in the OsiBodyFit reference — for every gym.
-const LOGO_DESIGN_FILL = 0.776;
+const LOGO_DESIGN_FILL = 0.75;   // logo design fills 75% of its tile everywhere
 const logoFit = src => { const m = logoMeta(src); return m ? m.fit : 0.9; };
 // Tile colour behind a logo: its own background colour, so no white ring shows around dark logos
 const logoTileBg = src => { const m = src ? logoMeta(src) : null; return (m && m.tile) || '#ffffff'; };
@@ -3505,6 +3506,22 @@ function heroComposite(src, sw, sh, left, top, width, fill, grad) {
   const url = c.toDataURL('image/jpeg', 0.95);
   if (_heroComp.size > 80) _heroComp.delete(_heroComp.keys().next().value);
   _heroComp.set(key, url); return url;
+}
+
+
+// Where a logo / wordmark image on a plain background goes inside the phone (phone-local px).
+// Phones (iPhone / Android screens): fitted to the approved "Pilates by OsiBodyFit" iPhone reference —
+// wordmark 64.6% of the phone width, centred at 52.4% across and 36.4% down; on screen 2 it shifts with the
+// rest of the phone content (screen-2 shift), as in that reference.
+// Others keep the OsiBodyFit flyer rule (84.8% wide, 4.5% in, centred at 49% + 3.5% of width; tablet 59.2% of that).
+function plainPlace(HM, sw, sh, tabletDevice, phone, S2) {
+  const bw = HM.box.x1 - HM.box.x0, cxB = (HM.box.x0 + HM.box.x1) / 2, cyB = (HM.box.y0 + HM.box.y1) / 2;
+  if (phone && !tabletDevice) {
+    const w = 0.646 * sw / bw, h = w / HM.aspect;
+    return { l: 0.524 * sw - cxB * w + S2.ux, t: 0.364 * sh - cyB * h + S2.uy, w };
+  }
+  const tk = tabletDevice ? 0.592 : 1, w = 0.848 * tk * sw / bw, h = w / HM.aspect;
+  return { l: (0.469 - 0.424 * tk) * sw - HM.box.x0 * w + S2.px, t: (0.49 * sh + 0.035 * tk * sw) - cyB * h + S2.py, w };
 }
 
 function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice, iosDevice, s2) {
@@ -3592,10 +3609,7 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
   // where the photo goes (same rules as before), so it can be merged with the colour fade
   let PL = null;
   if (hero && HF && HM) {
-    if (HM.plain) {
-      const tk = tabletDevice ? 0.592 : 1, bw = HM.box.x1 - HM.box.x0, imgW = 0.848 * tk * sw / bw, imgH = imgW / HM.aspect;
-      PL = { l: (0.469 - 0.424 * tk) * sw - HM.box.x0 * imgW + S2.px, t: (0.49 * sh + 0.035 * tk * sw) - ((HM.box.y0 + HM.box.y1) / 2) * imgH + S2.py, w: imgW };
-    } else if (HM.aspect > 1) PL = { l: -0.0185 * sw + S2.px, t: 0.49 * sh - 1.037 * sw / HM.aspect / 2 + S2.py, w: 1.037 * sw };
+    if (HM.plain) PL = plainPlace(HM, sw, sh, tabletDevice, iosDevice === true, S2); else if (HM.aspect > 1) PL = { l: -0.0185 * sw + S2.px, t: 0.49 * sh - 1.037 * sw / HM.aspect / 2 + S2.py, w: 1.037 * sw };
     else PL = { l: HF.x * sw + S2.px, t: HF.y * sh + S2.py, w: HF.w * sw };
   }
   const COMP = PL ? heroComposite(hero, sw, sh, PL.l, PL.t, PL.w, (HM.plain || HM.aspect > 1) ? HM.edge : '#111', grad) : null;
@@ -3607,9 +3621,8 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
           // screen width, starting 4.5% in, centred at 49% height (+3.5% of width); rest = the image's own background
           // tablet: the same photo shows 59.2% as large (relative to the device width) as on phones — measured from
           // the approved black iPhone vs tablet references; centred on the same point
-          const tk = tabletDevice ? 0.592 : 1, bw = HM.box.x1 - HM.box.x0, imgW = 0.848 * tk * sw / bw, imgH = imgW / HM.aspect;
-          const left = (0.469 - 0.424 * tk) * sw - HM.box.x0 * imgW, top = (0.49 * sh + 0.035 * tk * sw) - ((HM.box.y0 + HM.box.y1) / 2) * imgH;
-          return `<img src="${hero}" style="position:absolute;left:${(left + S2.px).toFixed(2)}px;top:${(top + S2.py).toFixed(2)}px;width:${imgW.toFixed(2)}px;height:auto;max-width:none;display:block;">`;
+          const Q = plainPlace(HM, sw, sh, tabletDevice, iosDevice === true, S2);
+          return `<img src="${hero}" style="position:absolute;left:${Q.l.toFixed(2)}px;top:${Q.t.toFixed(2)}px;width:${Q.w.toFixed(2)}px;height:auto;max-width:none;display:block;">`;
         })()
       : (hero && HF) ? ((HM && HM.aspect > 1)
         ? `<img src="${hero}" style="position:absolute;left:${(-0.0185*sw + S2.px).toFixed(2)}px;top:${(0.49*sh - 1.037*sw/HM.aspect/2 + S2.py).toFixed(2)}px;width:${(1.037*sw).toFixed(2)}px;height:auto;max-width:none;display:block;">`
@@ -3648,9 +3661,10 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
 // Tablet glow fitted to tablet.1/2 (Reference.zip): stronger and tighter than the phones'. Values in tablet px (1770 wide).
 // Device glow per screen, fitted to the blue June references (glow only shows on coloured backgrounds).
 // Screen 2 is laid out on its own in the references, so it has its own glow (strength tuned by rendering). Screen-1 phones keep the original fit.
+// screen-2 phone shadow strength re-tuned (×0.92) to the Pilates by OsiBodyFit iPhone reference
 const GLOW_FIT = {
-  iphone:  { 2: { base:955, SA:0.2316, SG:114.604, SP:48.105, OU:172.286, ON:229.709, N:40 } },
-  android: { 2: { base:955, SA:0.266, SG:114.655, SP:-8.352, OU:225.87, ON:173.98, N:40 } },
+  iphone:  { 2: { base:955, SA:0.2131, SG:114.604, SP:48.105, OU:172.286, ON:229.709, N:40 } },
+  android: { 2: { base:955, SA:0.2447, SG:114.655, SP:-8.352, OU:225.87, ON:173.98, N:40 } },
   tablet:  { 1: { base:1763, SA:0.95, SG:113.342, SP:122.35, OU:193.993, ON:-18.949, N:64 }, 2: { base:1763, SA:0.7, SG:116.066, SP:-110.293, OU:284.244, ON:193.839, N:64 } },
 };
 const TABLET_GLOW = { base:1770, SA:0.55, SG:181.5, SP:-79, OU:135, ON:107.6, N:96 };   // many layers → smooth (no banding)
