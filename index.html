@@ -3403,8 +3403,8 @@ const PHOTO_FRAME = {
   qr:      { x:-0.3245, y:-0.0006, w:1.625 },  // read straight from promote.pdf
 };
 const SCREEN2_SHIFT = {
-  iphone:  { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true },   // continuous: screen 2 = the same phone as screen 1 (seen past the gap)
-  android: { px:0, py:0, ux:14, uy:15, s2:true, samePhoto:true },   // continuous across the gap; box shifted back so it lines up with screen 1
+  iphone:  { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true },
+  android: { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true },   // one phone across screens 1–2 (same as iPhone)
   tablet:  { px:0, py:0, ux:0,  uy:0, s2:true },   // carousel: nothing shifts between screens 1 and 2
 };
 // Photo shape + edge colour (cached). Wide photos (wider than tall) are shown whole, as in promote.pdf (OsiBodyFit):
@@ -3447,20 +3447,27 @@ function logoMeta(src) {
   _logoMeta.set(src, null);
   const im = new Image();
   im.onload = () => {
-    const N = 96, c = document.createElement('canvas'); c.width = N; c.height = N; const x = c.getContext('2d'); x.drawImage(im, 0, 0, N, N);
-    const d = x.getImageData(0, 0, N, N).data, at = (px, py) => (py * N + px) * 4;
+    // measured in the file's real shape (longest side 256 px), not a squashed square
+    const IW = im.naturalWidth || 1, IH = im.naturalHeight || 1, q = 256 / Math.max(IW, IH);
+    const NW = Math.max(1, Math.round(IW * q)), NH = Math.max(1, Math.round(IH * q)), N = NW;
+    const c = document.createElement('canvas'); c.width = NW; c.height = NH; const x = c.getContext('2d'); x.drawImage(im, 0, 0, NW, NH);
+    const d = x.getImageData(0, 0, NW, NH).data, at = (px, py) => (py * NW + px) * 4;
     const a = (px, py) => d[at(px, py) + 3];
-    const clear = [a(0,0), a(N-1,0), a(0,N-1), a(N-1,N-1), a(N>>1,0), a(0,N>>1)].some(v => v < 200);
+    const clear = [a(0,0), a(NW-1,0), a(0,NH-1), a(NW-1,NH-1), a(NW>>1,0), a(0,NH>>1)].some(v => v < 200);
     const bgc = [0, 1, 2].map(k => d[at(1, 1) + k]);
     // the design = see-through logos: everything opaque; solid logos: everything that differs from the background colour
     let x0 = N, y0 = N, x1 = -1, y1 = -1;
-    for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+    for (let py = 0; py < NH; py++) for (let px = 0; px < NW; px++) {
       const i = at(px, py); if (d[i + 3] < 128) continue;
       if (!clear && Math.abs(d[i] - bgc[0]) + Math.abs(d[i+1] - bgc[1]) + Math.abs(d[i+2] - bgc[2]) < 60) continue;
       if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
     }
-    const span = x1 >= x0 ? Math.max(x1 - x0 + 1, y1 - y0 + 1) / N : 1;
-    _logoMeta.set(src, { seeThrough: clear, span, fit: Math.min(1.6, Math.max(0.4, LOGO_DESIGN_FILL / span)),
+    if (x1 < x0) { x0 = 0; y0 = 0; x1 = NW - 1; y1 = NH - 1; }
+    const dw = x1 - x0 + 1, dh = y1 - y0 + 1, span = Math.max(dw, dh) / NW;           // design's longest side, in image widths
+    const fitW = Math.min(4, Math.max(0.2, LOGO_DESIGN_FILL / span));                 // image width as a share of the tile
+    // where the image goes so the DESIGN (not the file) is centred in the tile — all as shares of the tile
+    const place = { w: fitW, h: fitW * NH / NW, x: 0.5 - fitW * ((x0 + x1 + 1) / 2) / NW, y: 0.5 - fitW * ((y0 + y1 + 1) / 2) / NW };
+    _logoMeta.set(src, { seeThrough: clear, span, place, fit: Math.min(1.6, Math.max(0.4, LOGO_DESIGN_FILL / span)),
       tile: clear ? '#ffffff' : `rgb(${bgc.join(',')})` });   // tile = the logo's own background (white for see-through logos)
     if (typeof render === 'function') render();
   };
@@ -3468,8 +3475,11 @@ function logoMeta(src) {
   return null;
 }
 // The logo's design (circle, letters, mark) fills 77.6% of its white tile — as in the OsiBodyFit reference — for every gym.
-const LOGO_DESIGN_FILL = 0.75;   // logo design fills 75% of its tile everywhere
+const LOGO_DESIGN_FILL = 0.70;   // logo design fills 70% of its tile everywhere (tiles + app icons)
 const logoFit = src => { const m = logoMeta(src); return m ? m.fit : 0.9; };
+// Where the logo image sits in its tile (shares of the tile) so the design is centred and fills LOGO_DESIGN_FILL
+const logoPlace = src => { const m = logoMeta(src); return (m && m.place) || { w: 0.9, h: 0.9, x: 0.05, y: 0.05 }; };
+const logoImgStyle = src => { const p = logoPlace(src); return `position:absolute;left:${(p.x * 100).toFixed(3)}%;top:${(p.y * 100).toFixed(3)}%;width:${(p.w * 100).toFixed(3)}%;height:${(p.h * 100).toFixed(3)}%;max-width:none;max-height:none;display:block;`; };
 // Tile colour behind a logo: its own background colour, so no white ring shows around dark logos
 const logoTileBg = src => { const m = src ? logoMeta(src) : null; return (m && m.tile) || '#ffffff'; };
 function heroMetaReady(src) {
@@ -3569,7 +3579,7 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
     padX = D(I.left); logoSz = D(I.logo); logoBR = D(I.logo * 0.24);
     btnH = D(I.btnH); btnTop = sh - D(I.btnBot) - btnH; btnMx = D(I.btnMx); btnBR = D(I.btnH / 2); btnFs = D(I.btnFs);
     if (I.btnMxR != null) btnMxR = D(I.btnMxR);
-    if (window._btnSym) btnMxR = btnMx;   // iPhone: button box the same distance from the right edge as from the left
+    if (window._btnSym) { btnMx = D(82.4); btnMxR = D(82.4); }   // same box on both screens (continuous phone)   // iPhone: button box the same distance from the right edge as from the left
     if (I.btnBW != null) btnBW = (I.btnBW * m).toFixed(2);
     if (I.exact) btnFs = +(I.btnFs * m).toFixed(2);
     nameTop = sh - D(I.nameFromBot); logoTop = sh - D(I.logoFromBot);
@@ -3624,8 +3634,9 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
   // where the photo goes (same rules as before), so it can be merged with the colour fade
   let PL = null;
   if (hero && HF && HM) {
-    if (HM.plain) PL = plainPlace(HM, sw, sh, tabletDevice, iosDevice === true, S2); else if (HM.aspect > 1) PL = { l: -0.0185 * sw + S2.px, t: 0.49 * sh - 1.037 * sw / HM.aspect / 2 + S2.py, w: 1.037 * sw };
-    else PL = { l: HF.x * sw + S2.px, t: HF.y * sh + S2.py, w: HF.w * sw };
+    { // Hero photo fills the device screen exactly as uploaded (cover, centred): fits the tablet, trimmed on the others
+      const cw2 = Math.max(sw, sh * HM.aspect);
+      PL = { l: (sw - cw2) / 2 + S2.px, t: (sh - cw2 / HM.aspect) / 2 + S2.py, w: cw2 }; }
   }
   const COMP = PL ? heroComposite(hero, sw, sh, PL.l, PL.t, PL.w, (HM.plain || HM.aspect > 1) ? HM.edge : '#111', grad) : null;
   return `
@@ -3653,7 +3664,7 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
       background-color:${logoTileBg(logoImg)};
       display:flex;align-items:center;justify-content:center;">
       ${logoImg
-        ? `<img src="${logoImg}" style="width:${(logoFit(logoImg) * 100).toFixed(2)}%;height:auto;max-width:none;flex:none;display:block;">`
+        ? `<img src="${logoImg}" style="${logoImgStyle(logoImg)}">`
         : `<div style="width:100%;height:100%;border:1px dashed #444;
              display:flex;align-items:center;justify-content:center;">
              <span style="${F}color:#777;font-size:${D(28)}px;">logo</span></div>`}
@@ -3927,7 +3938,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
         overflow:hidden;z-index:3;
         display:flex;align-items:center;justify-content:center;${iconImg?`background-color:${logoTileBg(iconImg)};`:'background:rgba(0,0,0,0.3);'}">
         ${iconImg
-          ? `<img src="${iconImg}" style="width:${(logoFit(iconImg) * 100).toFixed(2)}%;height:auto;max-width:none;flex:none;display:block;">`
+          ? `<img src="${iconImg}" style="${logoImgStyle(iconImg)}">`
           : `<div style="width:100%;height:100%;
                border:1.5px dashed rgba(255,255,255,0.25);display:flex;align-items:center;justify-content:center;">
                <span style="${F}color:rgba(255,255,255,0.4);font-size:${S(9)}px;">icon</span></div>`
@@ -3998,7 +4009,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
     const txt = (t, base, fs, css) => `<div style="position:absolute;top:${S(base - 0.85*fs)}px;${css}font-size:${S(fs)}px;line-height:1;white-space:nowrap;${HIDE}">${t}</div>`;
     const logoTile = (x, y, sz, rad, z) => { if (VEC && logo) VEC.logos.push({ x, y, sz, rad, fit: logoFit(logo) }); if (VEC && !logo) (VEC.noLogo = VEC.noLogo || []).push({ x, y, sz, rad }); return ''
       + logoShadow(S(x), S(y), S(sz), S(rad), z)
-      + `<div style="position:absolute;left:${S(x)}px;top:${S(y)}px;width:${S(sz)}px;height:${S(sz)}px;z-index:${z};border-radius:${S(rad)}px;overflow:hidden;background:${logo ? logoTileBg(logo) : '#000'};${(VEC && logo) ? '' : bgimg(logo, (logoFit(logo) * 100).toFixed(2) + '%')}`
+      + `<div style="position:absolute;left:${S(x)}px;top:${S(y)}px;width:${S(sz)}px;height:${S(sz)}px;z-index:${z};border-radius:${S(rad)}px;overflow:hidden;background:${logo ? logoTileBg(logo) : '#000'};${(VEC && logo) ? '' : (logo ? (() => { const p = logoPlace(logo), T = S(sz); return `background-image:url('${logo}');background-repeat:no-repeat;background-size:${(p.w*T).toFixed(2)}px ${(p.h*T).toFixed(2)}px;background-position:${(p.x*T).toFixed(2)}px ${(p.y*T).toFixed(2)}px;`; })() : '')}`
       + `box-shadow:0 0 0 ${S(0.75)}px rgba(0,0,0,.10);">`
       + (logo ? '' : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;${PSB}color:#8a8f98;font-size:${S(sz*0.16)}px;">Logo</div>`)
       + `</div>`; };
@@ -4123,7 +4134,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
           // Always draw the tile: uploaded logo, or a "Logo" placeholder when none yet.
           s += `<div style="position:absolute;left:${S(p.lx)}px;top:${S(p.ly)}px;width:${S(p.ls)}px;height:${S(p.ls)}px;z-index:5;`
             + `background:${logoImg ? logoTileBg(logoImg) : '#fff'};border-radius:${S(28 * p.ls / 131)}px;overflow:hidden;display:flex;align-items:center;justify-content:center;">`
-            + (logoImg ? `<img src="${logoImg}" style="width:${(logoFit(logoImg) * 100).toFixed(2)}%;height:auto;max-width:none;flex:none;">`
+            + (logoImg ? `<img src="${logoImg}" style="${logoImgStyle(logoImg)}">`
                        : `<span style="${PSB}color:#9aa0ab;font-size:${S(30)}px;">Logo</span>`)
             + `</div>`;
           return s;
@@ -4187,15 +4198,15 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
     // Screens 1–2: panorama hero — one tilted glossy phone across both panels.
     // iOS geometry pixel-measured from 2.png/3.png; Android tuned for the 1242×2208 canvas.
     // Combined 2484-wide canvas (2 × 1242); screen 2 is shifted left by one panel.
-    const HG = ({ iphone:{PW:955,mul:2140/955,RAD:56,TILT:30,PCX:1320,PCY:1351},   // iOS measured from approved phone.6.5-1/2
-                  android:{PW:955,mul:2140/955,RAD:56,TILT:30,PCX:1448.6,PCY:1102},   // Android measured from approved phone.5.5-1/2
+    const HG = ({ iphone:{PW:955,mul:2140/955,RAD:56,TILT:30,PCX:1422,PCY:1351},   // iOS measured from approved phone.6.5-1/2
+                  android:{PW:823.7,mul:2140/955,RAD:54.1,TILT:30,PCX:1422,PCY:1109.8},   // Android measured from approved phone.5.5-1/2
                   tablet:{PW:1763,mul:2380/1763,RAD:64,TILT:30,PCX:2262.7,PCY:1438.8} })[layout];
     const PW = HG.PW, PH = Math.round(HG.PW * HG.mul), RAD = S(HG.RAD), TILT = HG.TILT;
     const PCX = HG.PCX, PCY = HG.PCY;             // device center (combined space)
     // Use the platform being rendered, not the currently selected UI tab. This keeps JPG 1–2 perfectly aligned in direct and ZIP exports.
     // Tablet: screen 2 continues as if the gap between the screenshots (12px at 172px wide in the gallery
     // ≈ 143px at full size) were part of the picture, so the tablet reads as one continuous image across the gap.
-    const SEAM_GAP = { tablet: 143, iphone: 100, android: 110 };   // Android screen-2 phone 10px left of iPhone's setting   // iPhone: screen-2 phone moved 40px right (approved)   // iPhone: 12px at 106px wide in the gallery
+    const SEAM_GAP = { tablet: 158, iphone: 120, android: 120 };   // A: screen-2 phone a little lower so the cut looks straighter   // measured: preview gap 12px at 95.6px (phones) / 155.2px (tablet) wide   // Android screen-2 phone 10px left of iPhone's setting   // iPhone: screen-2 phone moved 40px right (approved)   // iPhone: 12px at 106px wide in the gallery
     const off = (screen === 2) ? SIZES[layout].w + (SEAM_GAP[layout] || 0) : 0;
     const pl = S(PCX - PW / 2 - off), pt = S(PCY - PH / 2), cw = S(PW), chh = S(PH);
     // where the phone leaves screen 1 — long names inside the phone wrap before that edge
@@ -4203,8 +4214,10 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
 
     let sh = '';                                  // soft drop shadow (down-right)
     if (layout === 'iphone' || layout === 'android' || layout === 'tablet') {
-      window._glowSmooth = (layout === 'iphone' || layout === 'tablet');   // iPhone + tablet: smooth shadows (same shape)
-      sh = phoneGlow(pl, pt, cw, chh, RAD, TILT, bg, (GLOW_FIT[layout] && GLOW_FIT[layout][screen]) || (layout === 'tablet' ? TABLET_GLOW : null));
+      window._glowSmooth = (layout === 'iphone' || layout === 'android' || layout === 'tablet');   // iPhone + tablet: smooth shadows (same shape)
+      // iPhone: screens 1–2 show ONE phone, so screen 2 uses screen 1's shadow (same shape, continues across the gap)
+      const glowScr = ((layout === 'iphone' || layout === 'android') && screen === 2) ? 1 : screen;
+      sh = phoneGlow(pl, pt, cw, chh, RAD, TILT, bg, (GLOW_FIT[layout] && GLOW_FIT[layout][glowScr]) || (layout === 'tablet' ? TABLET_GLOW : null));
       window._glowSmooth = false;
     } else {
     const BL = S(80), NL = 16;
@@ -4225,7 +4238,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
           background:transparent;border-style:solid;border-width:${hair(0.5 * sc)[0].toFixed(2)}px;${join ? 'border-left-width:0;' : ''}
           border-left-color:${outlineK(bg) === 0 ? 'rgba(255,255,255,0)' : leftBorder.replace(/,([\d.]+)\)$/, (m, a) => ',' + aw(0.15, (hair(0.5 * sc)[1] * outlineK(bg))) + ')')};border-bottom-color:rgba(255,255,255,${aw(0.15, (hair(0.5 * sc)[1] * outlineK(bg)))});
           border-top-color:rgba(255,255,255,${aw(0.15, (hair(0.5 * sc)[1] * outlineK(bg)))});border-right-color:rgba(255,255,255,0.0);">
-          ${(() => { window._btnSym = (layout === 'iphone' || layout === 'android'); const h = splashHTML(cw, chh, bg, hero, logoImg, name, 100, layout === 'tablet', layout === 'iphone' || layout === 'android', s2v); window._btnSym = false; return h; })()}
+          ${(() => { window._btnSym = (layout === 'iphone' || layout === 'android'); window._isAndBtn = (layout === 'android'); const h = splashHTML(cw, chh, bg, hero, logoImg, name, 100, layout === 'tablet', layout === 'iphone' || layout === 'android', s2v); window._btnSym = false; return h; })()}
           <div style="position:absolute;top:0;bottom:0;left:${-join}px;width:${cw}px;pointer-events:none;z-index:9;
             background:linear-gradient(125deg,rgba(255,255,255,0.22) 0%,rgba(255,255,255,0.07) 15%,rgba(255,255,255,0) 36%);"></div>
         </div>
@@ -4586,9 +4599,9 @@ async function buildPromotePdf() {
     LOGO_SHADOW_LAYERS.forEach((S_, i) => _drawRotImage(P, page, shadowImgs[i], lx + S_.x * ls, ly + S_.y * ls, S_.w * ls, S_.w * ls));
     page.drawSvgPath(_rrSvg(lx, ly, ls, ls, lr, _qrToPage), { x: 0, y: 792, color: TILE, borderWidth: 0 });
     if (logoPng) {
-      const fit = logoFit(imgData.featureIcon), fs = ls * fit, k = Math.min(fs / logoPng.width, fs / logoPng.height), w = logoPng.width * k, h = logoPng.height * k;
+      const pp = logoPlace(imgData.featureIcon), w = pp.w * ls, h = pp.h * ls;
       page.pushOperators(P.pushGraphicsState(), ..._rrClipOps(P, lx, ly, ls, ls, lr, _qrToPage));
-      _drawRotImage(P, page, logoPng, lx + (ls - w) / 2, ly + (ls - h) / 2, w, h);
+      _drawRotImage(P, page, logoPng, lx + pp.x * ls, ly + pp.y * ls, w, h);
       page.pushOperators(P.popGraphicsState());
     }
     const t = QRP.tilt * Math.PI / 180, c = Math.cos(t), sn = Math.sin(t);
@@ -4633,8 +4646,8 @@ async function buildPromotePdf() {
         P.lineTo(x + r, y + s), P.appendBezierCurve(x + r - k, y + s, x, y + s - r + k, x, y + s - r),
         P.lineTo(x, y + r), P.appendBezierCurve(x, y + r - k, x + r - k, y, x + r, y), P.closePath(), P.clip(), P.endPath());
       page.drawRectangle({ x, y, width: s, height: s, color: TILE });   // tile in the logo's own background colour
-      const fs = s * (L.fit || 0.931), sc = Math.min(fs / logoImg.width, fs / logoImg.height), w = logoImg.width * sc, h = logoImg.height * sc;   // fitted, centred
-      page.drawImage(logoImg, { x: x + (s - w) / 2, y: y + (s - h) / 2, width: w, height: h });
+      const pp = logoPlace(imgData.featureIcon), w = pp.w * s, h = pp.h * s;   // design centred in the tile
+      page.drawImage(logoImg, { x: x + pp.x * s, y: y + s - pp.y * s - h, width: w, height: h });
       page.pushOperators(P.popGraphicsState());
     }
   }
@@ -4729,6 +4742,29 @@ function exportName(plat, s) {
 // ── Icon-pack generation (in-browser, from the uploaded App Logo) ────────────────
 const _toBlob = (c, type = 'image/jpeg', q = 0.95) => new Promise(r => c.toBlob(r, type, q));
 const _loadImg = (src) => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
+// Find the logo's DESIGN (ignores transparent space, or space in the logo's own background colour)
+function _designBox(img) {
+  const IW = img.naturalWidth || 1, IH = img.naturalHeight || 1, q = 256 / Math.max(IW, IH);
+  const NW = Math.max(1, Math.round(IW * q)), NH = Math.max(1, Math.round(IH * q));
+  const c = document.createElement('canvas'); c.width = NW; c.height = NH; const x = c.getContext('2d'); x.drawImage(img, 0, 0, NW, NH);
+  const d = x.getImageData(0, 0, NW, NH).data, at = (px, py) => (py * NW + px) * 4, a = (px, py) => d[at(px, py) + 3];
+  const clear = [a(0,0), a(NW-1,0), a(0,NH-1), a(NW-1,NH-1), a(NW>>1,0), a(0,NH>>1)].some(v => v < 200);
+  const bgc = [0, 1, 2].map(k => d[at(1, 1) + k]);
+  let x0 = NW, y0 = NH, x1 = -1, y1 = -1;
+  for (let py = 0; py < NH; py++) for (let px = 0; px < NW; px++) {
+    const i = at(px, py); if (d[i + 3] < 128) continue;
+    if (!clear && Math.abs(d[i] - bgc[0]) + Math.abs(d[i+1] - bgc[1]) + Math.abs(d[i+2] - bgc[2]) < 60) continue;
+    if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+  }
+  if (x1 < x0) { x0 = 0; y0 = 0; x1 = NW - 1; y1 = NH - 1; }
+  return { cx: (x0 + x1 + 1) / 2 / q, cy: (y0 + y1 + 1) / 2 / q, size: Math.max(x1 - x0 + 1, y1 - y0 + 1) / q };
+}
+// Draw the logo so its DESIGN is centred and its longest side = frac of the canvas
+function _designDraw(ctx, img, cs, frac) {
+  const B = _designBox(img), s = cs * frac / B.size;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, cs / 2 - B.cx * s, cs / 2 - B.cy * s, img.naturalWidth * s, img.naturalHeight * s);
+}
 function _fitDraw(ctx, img, cs, frac) {            // draw logo centered, scaled to frac of canvas
   const t = cs * frac, s = Math.min(t / img.naturalWidth, t / img.naturalHeight);
   const w = img.naturalWidth * s, h = img.naturalHeight * s;
@@ -4757,10 +4793,13 @@ const IOS_CONTENTS = {"images":[
 
 async function _genIosIcons(logo, zip) {
   const inner = new JSZip();
+  // background = the logo's own background colour (black for see-through logos, as before)
+  const tc = document.createElement('canvas'); tc.width = tc.height = 8; tc.getContext('2d').drawImage(logo, 0, 0, 8, 8);
+  const tp = tc.getContext('2d').getImageData(0, 0, 1, 1).data, bg = tp[3] < 200 ? '#000' : `rgb(${tp[0]},${tp[1]},${tp[2]})`;
   for (const [name, size] of Object.entries(IOS_ICON_SIZES)) {
     const c = document.createElement('canvas'); c.width = c.height = size;
-    const x = c.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, size, size);
-    x.imageSmoothingQuality = 'high'; x.drawImage(logo, 0, 0, size, size);   // logo composited on black (RGB)
+    const x = c.getContext('2d'); x.fillStyle = bg; x.fillRect(0, 0, size, size);
+    _designDraw(x, logo, size, LOGO_DESIGN_FILL);   // design centred, 70% — no stretching
     const blob = await _toBlob(c, 'image/png');
     zip.file('icon-iOS/' + name, blob); inner.file(name, blob);
   }
@@ -4778,17 +4817,19 @@ async function _genAndroidIcons(logo, zip) {
   const dens = { 'mipmap-mdpi':[48,108,60],'mipmap-hdpi':[72,162,88],'mipmap-xhdpi':[96,216,118],'mipmap-xxhdpi':[144,324,176],'mipmap-xxxhdpi':[192,432,236] };
   for (const [folder, [lpx, apx, fpx]] of Object.entries(dens)) {
     let c = document.createElement('canvas'); c.width = c.height = lpx; let x = c.getContext('2d');
-    x.fillStyle = bg; x.fillRect(0, 0, lpx, lpx); _fitDraw(x, logo, lpx, 1);
+    x.fillStyle = bg; x.fillRect(0, 0, lpx, lpx); _designDraw(x, logo, lpx, LOGO_DESIGN_FILL);
     zip.file(`icon-android/${folder}/ic_launcher.png`, await _toBlob(c, 'image/png'));
     c = document.createElement('canvas'); c.width = c.height = apx; x = c.getContext('2d');
-    _fitDraw(x, logo, apx, fpx / apx);   // transparent canvas, logo centred
+    // as in the reference: transparent canvas with a centred logo tile (fpx) in the logo's own colour; design centred at 70% of the tile
+    { const o = (apx - fpx) / 2; x.fillStyle = bg; x.fillRect(o, o, fpx, fpx);
+      x.save(); x.beginPath(); x.rect(o, o, fpx, fpx); x.clip(); x.translate(o, o); _designDraw(x, logo, fpx, LOGO_DESIGN_FILL); x.restore(); }
     zip.file(`icon-android/${folder}/ic_launcher_adaptive_front.png`, await _toBlob(c, 'image/png'));
     c = document.createElement('canvas'); c.width = c.height = apx; x = c.getContext('2d');
     x.fillStyle = bg; x.fillRect(0, 0, apx, apx);
     zip.file(`icon-android/${folder}/ic_launcher_adaptive_back.png`, await _toBlob(c, 'image/png'));
   }
   const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d');
-  x.fillStyle = bg; x.fillRect(0, 0, 512, 512); _fitDraw(x, logo, 512, 1);
+  x.fillStyle = bg; x.fillRect(0, 0, 512, 512); _designDraw(x, logo, 512, LOGO_DESIGN_FILL);
   zip.file('icon-android.png', await _toBlob(c, 'image/png'));
 }
 
