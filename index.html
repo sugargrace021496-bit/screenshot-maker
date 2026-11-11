@@ -3815,7 +3815,7 @@ function wrapName(rows, fs, weight, lsEm, maxW, maxLines, minK, saveLine) {
 const NAME_FIT = {
   iphone:  { step: 10, min: 80, edge: 1202 },   // 40px from the canvas edge
   android: { step: 10, min: 80, edge: 1202 },
-  tablet:  { step: 10, min: 80, edge: 2008 },
+  tablet:  { step: 10, min: 80, edge: 2008, finish: true },   // tablet: words must FINISH before the line
   feature: { step: 3,  min: 30, edge: 398 },    // same proportion as the phone, stays off the tilted phone
   qr:      { step: 2,  min: 17, edge: 241 },
 };
@@ -3829,20 +3829,26 @@ function fitNameRule(rows, fs, weight, lsEm, left, kind) {
   if (!rows.length) return { lines: rows, fs };
   let f = fs;
   for (;;) {
-    const out = [];
+    const out = []; let nearMiss = false;
     rows.forEach(r => {
       let cur = '';
       r.split(/\s+/).forEach(w => {
         if (!cur) { cur = w; return; }
-        if (adv(cur + ' ', f) < limit && ink(cur + ' ' + w, f) <= hard) cur += ' ' + w;
+        if (cfg.finish) {
+          // "Finish before the line": the word must end before the line, else it goes to the next line;
+          // if it would only go past by ~2 letters, the whole name steps down instead (checked below).
+          const over = ink(cur + ' ' + w, f) - limit;
+          if (over <= 0) cur += ' ' + w;
+          else { if (over <= ink(w.slice(-2), f)) nearMiss = true; out.push(cur); cur = w; }
+        } else if (adv(cur + ' ', f) < limit && ink(cur + ' ' + w, f) <= hard) cur += ' ' + w;
         else { out.push(cur); cur = w; }
       });
       if (cur) out.push(cur);
     });
-    const shrink = out.some(l => ink(l, f) > hard) || out.some(l => {
+    const shrink = (cfg.finish && (nearMiss || out.some(l => ink(l, f) > limit))) || out.some(l => ink(l, f) > hard) || (!cfg.finish && out.some(l => {
       const over = ink(l, f) - limit, last = l.split(' ').pop();
       return over > 0 && over <= ink(last.slice(-2), f);
-    });
+    }));
     if (shrink && f - cfg.step >= cfg.min) { f = +(f - cfg.step).toFixed(2); continue; }
     return { lines: out, fs: f };
   }
