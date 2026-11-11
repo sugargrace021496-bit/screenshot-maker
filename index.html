@@ -3403,8 +3403,8 @@ const PHOTO_FRAME = {
   qr:      { x:-0.3245, y:-0.0006, w:1.625 },  // read straight from promote.pdf
 };
 const SCREEN2_SHIFT = {
-  iphone:  { px:0, py:0, ux:-43.75, uy:27.75, ext:47, s2:true },
-  android: { px:0, py:0, ux:-43.75, uy:27.75, ext:47, s2:true },   // phone also 47px wider on its left side
+  iphone:  { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true },   // continuous: screen 2 = the same phone as screen 1 (seen past the gap)
+  android: { px:0, py:0, ux:14, uy:15, s2:true, samePhoto:true },   // continuous across the gap; box shifted back so it lines up with screen 1
   tablet:  { px:0, py:0, ux:0,  uy:0, s2:true },   // carousel: nothing shifts between screens 1 and 2
 };
 // Photo shape + edge colour (cached). Wide photos (wider than tall) are shown whole, as in promote.pdf (OsiBodyFit):
@@ -3558,6 +3558,7 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
     const t = sw / 1770, T = v => Math.round(v * t);
     padX = T(TAB_SPLASH.left); logoSz = T(TAB_SPLASH.logo); logoBR = T(TAB_SPLASH.logo * 0.24);
     btnH = T(TAB_SPLASH.btnH); btnTop = sh - T(TAB_SPLASH.btnBot) - btnH; btnMx = T(TAB_SPLASH.left); btnMxR = T(TAB_SPLASH.btnMxR);
+    btnMx = T(150); btnMxR = btnMx;
     btnBR = T(TAB_SPLASH.btnH / 2); btnFs = T(TAB_SPLASH.btnFs); btnBW = (2 * t).toFixed(2);
     nameFs = T(TAB_SPLASH.nameFs); nameTop = sh - T(TAB_SPLASH.nameFromBot);
     logoTop = sh - T(TAB_SPLASH.logoFromBot);
@@ -3568,6 +3569,7 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
     padX = D(I.left); logoSz = D(I.logo); logoBR = D(I.logo * 0.24);
     btnH = D(I.btnH); btnTop = sh - D(I.btnBot) - btnH; btnMx = D(I.btnMx); btnBR = D(I.btnH / 2); btnFs = D(I.btnFs);
     if (I.btnMxR != null) btnMxR = D(I.btnMxR);
+    if (window._btnSym) btnMxR = btnMx;   // iPhone: button box the same distance from the right edge as from the left
     if (I.btnBW != null) btnBW = (I.btnBW * m).toFixed(2);
     if (I.exact) btnFs = +(I.btnFs * m).toFixed(2);
     nameTop = sh - D(I.nameFromBot); logoTop = sh - D(I.logoFromBot);
@@ -3575,7 +3577,7 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
   const _u = sw / (tabletDevice ? 1770 : 955);
   const S2 = s2 ? { px: s2.px*_u, py: s2.py*_u, ux: s2.ux*_u, uy: s2.uy*_u, ps: s2.ps || 1, pcx: (s2.pcx||0)*_u, pcy: (s2.pcy||0)*_u } : { px:0, py:0, ux:0, uy:0, ps:1, pcx:0, pcy:0 };
   const isS2 = !!(s2 && s2.s2);
-  const PF = iosDevice === true ? PHOTO_FRAME[isS2 ? 'phone2' : 'phone1']
+  const PF = iosDevice === true ? PHOTO_FRAME[(isS2 && !s2.samePhoto) ? 'phone2' : 'phone1']
            : (iosDevice === FEAT_SPLASH) ? PHOTO_FRAME.feature
            : (iosDevice === QR_SPLASH) ? PHOTO_FRAME.qr
            : tabletDevice ? PHOTO_FRAME[isS2 ? 'tablet2' : 'tablet1'] : null;
@@ -3595,7 +3597,20 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
     const uEdge = V.W / 2 + (V.edge - 40 - V.cx + (v - V.H / 2) * Math.sin(t)) / Math.cos(t);
     nameMaxW = Math.max(sw * 0.25, Math.min(nameMaxW, uEdge * k - nameX));
   }
-  const NW = wrapName([String(name || '')], nameFs, 600, 0, nameMaxW, 2);
+  let NW = wrapName([String(name || '')], nameFs, 600, 0, nameMaxW, 2);
+  if (window._splashVis) {
+    // Screens 1–2 (iOS / Android / Tablet): fill the FIRST line first. If the name doesn't fit on one
+    // line, every word except the last goes on line 1 and the last word on line 2; the size comes down
+    // just enough for line 1 to fit (never below 50% of the reference size).
+    const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+    const inkW = (t, f) => { _wrapCtx.font = `600 ${f}px Poppins, Inter, sans-serif`; return _wrapCtx.measureText(t).actualBoundingBoxRight; };
+    if (words.length > 1 && inkW(words.join(' '), nameFs) > nameMaxW) {
+      const l1 = words.slice(0, -1).join(' '), l2 = words[words.length - 1];
+      const need = Math.max(inkW(l1, nameFs), inkW(l2, nameFs));
+      const f = Math.min(nameFs, Math.floor(nameFs * nameMaxW / need * 10) / 10);
+      if (f >= nameFs * 0.5) NW = { lines: [l1, l2], fs: f };
+    }
+  }
   const NLH = NW.fs * 1.1, nameLines = NW.lines.length ? NW.lines : [String(name || '')];
   { const bottom = nameTop + nameFs, newTop = bottom - NW.fs - (nameLines.length - 1) * NLH, up = nameTop - newTop;
     nameTop = newTop; logoTop -= up; nameFs = NW.fs; }
@@ -3720,6 +3735,26 @@ function phoneGlow(pl, pt, cw, chh, RAD, TILT, bg, G) {
     if (q > 0.97575) { const t=Math.sqrt(-2*Math.log(1-q)); return -(((((c[0]*t+c[1])*t+c[2])*t+c[3])*t+c[4])*t+c[5])/((((d[0]*t+d[1])*t+d[2])*t+d[3])*t+1); }
     const t=q-0.5, r=t*t; return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*t/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
   };
+  if (window._glowSmooth) {
+    // Smooth version (iPhone + tablet): the same shadow — same colour, strength, size, offset and softness —
+    // painted once as one blurred shape on a canvas instead of stacked layers, so it has no visible steps.
+    const cx = pl + dx + cw / 2, cy = pt + dy + chh / 2, grow = f * SP, sig = Math.max(0.5, f * SG);
+    const pad = Math.abs(grow) + 4 * sig, S = Math.ceil(Math.hypot(cw, chh) / 2 + pad) * 2;
+    const q = Math.min(2, Math.max(0.25, 1600 / S));                     // canvas resolution (enough for a soft shadow)
+    const c = document.createElement('canvas'); c.width = c.height = Math.ceil(S * q); const x = c.getContext('2d');
+    const w = cw + 2 * grow, h = chh + 2 * grow, r = Math.max(0, RAD + grow);
+    if (w > 0 && h > 0) {
+      const off = 10 * S * q;                                            // draw the shape off-canvas, keep only its blurred shadow
+      x.shadowColor = `rgba(${shCol},${Math.min(1, SA * 1.33).toFixed(4)})`; x.shadowBlur = 2 * sig * q; x.shadowOffsetX = off;
+      x.translate(c.width / 2 - off, c.height / 2); x.rotate(TILT * Math.PI / 180);
+      x.beginPath();
+      const L = -w / 2 * q, T = -h / 2 * q, W = w * q, H = h * q, R = Math.min(r * q, W / 2, H / 2);
+      x.moveTo(L + R, T); x.arcTo(L + W, T, L + W, T + H, R); x.arcTo(L + W, T + H, L, T + H, R);
+      x.arcTo(L, T + H, L, T, R); x.arcTo(L, T, L + W, T, R); x.closePath();
+      x.fillStyle = '#000'; x.fill();
+    }
+    return `<img src="${c.toDataURL('image/png')}" style="position:absolute;left:${(cx - S / 2).toFixed(2)}px;top:${(cy - S / 2).toFixed(2)}px;width:${S}px;height:${S}px;max-width:none;z-index:1;display:block;pointer-events:none;">`;
+  }
   let sh = '';
   for (let k = 1; k <= N; k++) {
     const g = Math.round(f * (SP + SG * probit(1 - (k - 0.5) / N)));
@@ -3736,9 +3771,9 @@ function phoneGlow(pl, pt, cw, chh, RAD, TILT, bg, G) {
 // Each layout has a "wrap line" (design px). If a word would cross it, that word moves to a new line.
 // A single word that is too long on its own shrinks the whole name just enough to fit.
 // Rows typed in the App Name box are always kept.
-const NAME_WRAP_LINE = { tablet:1542, iphone:1122, android:1122, feature:420, qr:250 };
+const NAME_WRAP_LINE = { tablet:1544, iphone:1047, android:1047, feature:347, qr:210 };   // QR line/edge scaled with the 32pt start size
 const NAME_LINE_HEIGHT = 1.2, NAME_LETTER_SPACING = 0;   // same on every screenshot
-const NAME_SIZE = { iphone:180, android:180, tablet:220, feature:60, qr:33.5 };   // QR: 33.5pt, as in both promote.pdf references   // fixed; long names wrap or shrink automatically
+const NAME_SIZE = { iphone:160, android:160, tablet:170, feature:53, qr:32 };   // QR: 33.5pt, as in both promote.pdf references   // fixed; long names wrap or shrink automatically
 const _wrapCtx = document.createElement('canvas').getContext('2d');
 function wrapName(rows, fs, weight, lsEm, maxW, maxLines, minK, saveLine) {
   // where the last letter's ink ends (not the advance width), as seen against the wrap line
@@ -3769,6 +3804,48 @@ function wrapName(rows, fs, weight, lsEm, maxW, maxLines, minK, saveLine) {
     while (g > fMin2) { g = Math.max(fMin2, Math.floor(g * 0.99 * 10) / 10); const t = wrapAt(g); if (t.length <= target) { out = t; f = g; break; } }
   }
   return { lines: out, fs: f };
+}
+// ── Start-size + trigger-line rule (screen 1, feature graphic, QR band) ─────────
+// Start at the start size. The wrap line is a TRIGGER: a word that starts before the line
+// stays on that line (it may cross it); once a line has passed the wrap line, the next word
+// starts a new line. If a line's last word pokes past the wrap line by only ~2 letters, the
+// whole name steps down by STEP and is tried again, until it no longer just pokes over.
+// "edge" = hard safety edge (canvas width minus the same left margin) so text never leaves the canvas.
+// Rows typed in the App Name box are always kept.
+const NAME_FIT = {
+  iphone:  { step: 10, min: 80, edge: 1202 },   // 40px from the canvas edge
+  android: { step: 10, min: 80, edge: 1202 },
+  tablet:  { step: 10, min: 80, edge: 2008 },
+  feature: { step: 3,  min: 30, edge: 398 },    // same proportion as the phone, stays off the tilted phone
+  qr:      { step: 2,  min: 17, edge: 241 },
+};
+function fitNameRule(rows, fs, weight, lsEm, left, kind) {
+  const cfg = NAME_FIT[kind], limit = NAME_WRAP_LINE[kind] - left, hard = cfg.edge - left;
+  const font = f => { _wrapCtx.font = `${weight} ${f}px Poppins, Inter, sans-serif`; };
+  const ls = (t, f) => lsEm * f * Math.max(0, [...t].length - 1);
+  const ink = (t, f) => { font(f); return _wrapCtx.measureText(t).actualBoundingBoxRight + ls(t, f); };   // where the last letter's ink ends
+  const adv = (t, f) => { font(f); return _wrapCtx.measureText(t).width + ls(t, f) + lsEm * f; };         // where the next word would start
+  rows = rows.map(r => r.trim()).filter(Boolean);
+  if (!rows.length) return { lines: rows, fs };
+  let f = fs;
+  for (;;) {
+    const out = [];
+    rows.forEach(r => {
+      let cur = '';
+      r.split(/\s+/).forEach(w => {
+        if (!cur) { cur = w; return; }
+        if (adv(cur + ' ', f) < limit && ink(cur + ' ' + w, f) <= hard) cur += ' ' + w;
+        else { out.push(cur); cur = w; }
+      });
+      if (cur) out.push(cur);
+    });
+    const shrink = out.some(l => ink(l, f) > hard) || out.some(l => {
+      const over = ink(l, f) - limit, last = l.split(' ').pop();
+      return over > 0 && over <= ink(last.slice(-2), f);
+    });
+    if (shrink && f - cfg.step >= cfg.min) { f = +(f - cfg.step).toFixed(2); continue; }
+    return { lines: out, fs: f };
+  }
 }
 // One line only: shrink to fit (never below minK of the size), then end with "…" if it still doesn't fit
 function fitOneLine(text, fs, weight, lsEm, maxW, minK) {
@@ -3854,7 +3931,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
     // Title (app name) — Poppins Medium, left 40, top 150, editable font size, z-index 3.
     const titleBlock = `
       <div style="position:absolute;left:${S(40)}px;top:${S(154.5 - (NAME_LINE_HEIGHT - 1.14) / 2 * headlineFs)}px;z-index:3;">
-        ${(() => { const W = wrapName(lines, headlineFs, 600, NAME_LETTER_SPACING, NAME_WRAP_LINE.feature - 40, 2, 0.5);   // feature graphic is short: at most 2 lines, may shrink to 50%
+        ${(() => { const W = fitNameRule(lines, headlineFs, 600, NAME_LETTER_SPACING, 40, 'feature');   // start size + trigger-line rule
           return W.lines.map(l =>
           `<div style="${P5}font-size:${S(W.fs)}px;color:white;
             line-height:${NAME_LINE_HEIGHT};letter-spacing:${NAME_LETTER_SPACING}em;white-space:nowrap;">${l}</div>`
@@ -3970,7 +4047,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
     // Colour-band overlays
     h += logoTile(24, 526, 48, 10.5, 8);
     const QLS = -0.018;   // QR band name tracking, as in promote.pdf
-    { const W = wrapName(val('feat-title').split('\n'), nameFs, 600, QLS, NAME_WRAP_LINE.qr - 24, 2);
+    { const W = fitNameRule(val('feat-title').split('\n'), nameFs, 600, QLS, 24, 'qr');   // start size + trigger-line rule
       const rows = W.lines.length ? W.lines : [name];
       h += `<div style="position:absolute;left:${S(24)}px;top:${S(621 - (0.85 + (NAME_LINE_HEIGHT - 1) / 2) * W.fs)}px;z-index:8;${P6}font-size:${S(W.fs)}px;letter-spacing:${QLS}em;color:#fff;line-height:${NAME_LINE_HEIGHT};white-space:nowrap;${HIDE}">${rows.join('<br>')}</div>`;
       rows.forEach((r, i) => vt(r, 621 + i * NAME_LINE_HEIGHT * W.fs, W.fs, 'left', 24, '#ffffff', QLS)); }
@@ -4017,18 +4094,25 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
         const header = (p) => {
           let s = `<div style="position:absolute;left:${S(p.mx)}px;top:${S(p.top)}px;width:${S(p.mw)}px;height:${S(p.h)}px;background:${bg};z-index:4;"></div>`
             + `<div style="position:absolute;left:${S(p.nx)}px;top:${S(p.top)}px;height:${S(p.h)}px;z-index:5;display:flex;align-items:center;gap:${S(p.gap || 20)}px;white-space:nowrap;">`
-            + (() => { const HN = fitOneLine(name, p.fs, p.fw || 700, 0, p.mx + p.mw - p.nx - (p.gap || 20) - 40);   // long names: shrink, then "…"
+            + (() => { const HN = fitOneLine(name, p.fs, p.fw || 700, 0, (p.cardR || (p.mx + p.mw)) - 40 - 73 * p.fs / 37.35 - p.nx, 1);   // same size as the class name; "…" only if it doesn't fit
+                p._hn = HN;   // the arrow follows the name exactly as drawn (after any shrink / "…")
                 return `<span style="font-family:Poppins,Inter,sans-serif;font-weight:${p.fw || 700};font-size:${(HN.fs * sc).toFixed(2)}px;color:#fff;line-height:1;">${HN.t}</span>`; })()
             + (p.chev ? '' : `<svg width="${S(34)}" height="${S(22)}" viewBox="0 0 34 22" style="display:block;flex:none;"><path d="M3 5 L17 17 L31 5" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`)
             + `</div>`;
           if (p.chev) {
             // Arrow placed at an exact spot: right after the name's measured width. Drawn as an <img>
             // (not inline SVG) so the downloaded files put it exactly where the preview does.
-            _wrapCtx.font = `${p.fw || 700} ${p.fs}px Poppins, Inter, sans-serif`;
-            const nameW = _wrapCtx.measureText(name).width, k = p.chev.k || 1;
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${34*k*4}" height="${26*k*4}" viewBox="0 0 34 26"><path d="M4 5 L17 18 L30 5" fill="none" stroke="#fff" stroke-width="${p.chev.sw}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-            s += `<img src="data:image/svg+xml;base64,${btoa(svg)}" style="position:absolute;z-index:5;left:${(( p.nx + nameW + (p.gap || 20)) * sc).toFixed(2)}px;`
-              + `top:${((p.top + p.h / 2 - 13 * k + p.chev.dy) * sc).toFixed(2)}px;width:${(34 * k * sc).toFixed(2)}px;height:${(26 * k * sc).toFixed(2)}px;display:block;">`;
+            // Matched to the reference (B-52 Jiu-Jitsu Academy, 1242 wide): arrow 33×20 visible, stroke 5,
+            // 40px after the last letter, bottom of the arrow on the text baseline. Scales with the name size.
+            const HN = p._hn || { t: name, fs: p.fs };
+            _wrapCtx.font = `${p.fw || 700} ${HN.fs}px Poppins, Inter, sans-serif`;
+            const mN = _wrapCtx.measureText(HN.t), nameW = mN.actualBoundingBoxRight, r = p.fs / 37.35, k = 1.065 * r * (p.chev.k || 1);   // chev.k / sw / lift: phone tuned to look like the tablet arrow
+            const baseY = p.top + p.h / 2 + (mN.fontBoundingBoxAscent - mN.fontBoundingBoxDescent) / 2;   // text baseline
+            const chevLeft = p.nx + nameW + 38 * r - 1.5 * k;                       // visible arrow starts 40px after the name
+            const chevTop  = baseY - 1 * r - (p.chev.lift || 0) - 20.5 * k;                               // visible arrow bottom sits on the baseline
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${34*k*4}" height="${26*k*4}" viewBox="0 0 34 26"><path d="M4 5 L17 18 L30 5" fill="none" stroke="#fff" stroke-width="${p.chev.sw || 5}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+            s += `<img src="data:image/svg+xml;base64,${btoa(svg)}" style="position:absolute;z-index:5;left:${(chevLeft * sc).toFixed(2)}px;`
+              + `top:${(chevTop * sc).toFixed(2)}px;width:${(34 * k * sc).toFixed(2)}px;height:${(26 * k * sc).toFixed(2)}px;display:block;">`;
           }
           // Always draw the tile: uploaded logo, or a "Logo" placeholder when none yet.
           s += `<div style="position:absolute;left:${S(p.lx)}px;top:${S(p.ly)}px;width:${S(p.ls)}px;height:${S(p.ls)}px;z-index:5;`
@@ -4041,15 +4125,15 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
         const cls1 = (val('cls1') || 'Bag Class'), cls2 = (val('cls2') || 'CrossFit');
         const C = (layout === 'tablet') ? {
           // Tablet values re-measured from the approved tablet.3/4/5 (header SemiBold 35.8, class names SemiBold 36)
-          h3:{mx:345,mw:660,top:654,h:64,nx:352,fs:35.8,fw:600,gap:30,chev:{sw:4.8,dy:5,k:1.13},lx:194,ly:624,ls:124},
-          h4:{mx:345,mw:660,top:652,h:64,nx:352,fs:35.8,fw:600,gap:30,chev:{sw:4.8,dy:4,k:1.13},lx:194,ly:622,ls:124},
+          h3:{mx:345,mw:660,top:654,h:64,nx:352,fs:35.8,fw:600,gap:30,cardR:1830,chev:{sw:5,dy:0},lx:194,ly:624,ls:124},
+          h4:{mx:345,mw:660,top:654,h:64,nx:352,fs:35.8,fw:600,gap:30,cardR:1830,chev:{sw:5,dy:0},lx:194,ly:624,ls:124},   // same spot as screen 3
           cls:[{l:234,t:1250,h:74},{l:234,t:1770,h:74},{l:234,t:2290,h:74}], clsFs:36, clsW:600,
           d4:{mx:300,mw:660,top:873,h:70,fs:36,tx:332},
           t5:{mx:674,mw:700,top:665,h:54,fs:36}
         } : (layout === 'iphone' || layout === 'android') ? {
           // iOS/Android values re-measured from the approved phone.6.5-3/4/5 (header Medium 37.5, class names SemiBold 48, titles 37)
-          h3:{mx:325,mw:620,top:458,h:62,nx:334,fs:37.35,fw:600,gap:39,chev:{sw:5.2,dy:6},lx:186,ly:429,ls:124},
-          h4:{mx:325,mw:620,top:459,h:62,nx:334,fs:37.35,fw:600,gap:39,chev:{sw:5.2,dy:6},lx:186,ly:429,ls:124},
+          h3:{mx:325,mw:620,top:460,h:62,nx:334,fs:37.35,fw:600,gap:39,cardR:1122,chev:{sw:4.2,k:1.01,lift:0},lx:186,ly:429,ls:124},
+          h4:{mx:325,mw:620,top:460,h:62,nx:334,fs:37.35,fw:600,gap:39,cardR:1122,chev:{sw:4.2,k:1.01,lift:0},lx:186,ly:429,ls:124},   // same spot as screen 3
           cls:[{l:227,t:1199,h:72},{l:227,t:1905,h:66}], clsFs:48, clsW:600,
           d4:{mx:300,mw:570,top:696.5,h:54,fs:37.35,tx:313},
           t5:{mx:327,mw:580,top:464.5,h:52,fs:37.4}
@@ -4103,14 +4187,19 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
     const PW = HG.PW, PH = Math.round(HG.PW * HG.mul), RAD = S(HG.RAD), TILT = HG.TILT;
     const PCX = HG.PCX, PCY = HG.PCY;             // device center (combined space)
     // Use the platform being rendered, not the currently selected UI tab. This keeps JPG 1–2 perfectly aligned in direct and ZIP exports.
-    const off = (screen === 2) ? SIZES[layout].w : 0;
+    // Tablet: screen 2 continues as if the gap between the screenshots (12px at 172px wide in the gallery
+    // ≈ 143px at full size) were part of the picture, so the tablet reads as one continuous image across the gap.
+    const SEAM_GAP = { tablet: 143, iphone: 100, android: 110 };   // Android screen-2 phone 10px left of iPhone's setting   // iPhone: screen-2 phone moved 40px right (approved)   // iPhone: 12px at 106px wide in the gallery
+    const off = (screen === 2) ? SIZES[layout].w + (SEAM_GAP[layout] || 0) : 0;
     const pl = S(PCX - PW / 2 - off), pt = S(PCY - PH / 2), cw = S(PW), chh = S(PH);
     // where the phone leaves screen 1 — long names inside the phone wrap before that edge
     window._splashVis = { cx: PCX, cy: PCY, W: PW, H: PH, edge: SIZES[layout].w, tilt: TILT };
 
     let sh = '';                                  // soft drop shadow (down-right)
     if (layout === 'iphone' || layout === 'android' || layout === 'tablet') {
+      window._glowSmooth = (layout === 'iphone' || layout === 'tablet');   // iPhone + tablet: smooth shadows (same shape)
       sh = phoneGlow(pl, pt, cw, chh, RAD, TILT, bg, (GLOW_FIT[layout] && GLOW_FIT[layout][screen]) || (layout === 'tablet' ? TABLET_GLOW : null));
+      window._glowSmooth = false;
     } else {
     const BL = S(80), NL = 16;
     for (let i = 0; i < NL; i++) {
@@ -4130,7 +4219,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
           background:transparent;border-style:solid;border-width:${hair(0.5 * sc)[0].toFixed(2)}px;${join ? 'border-left-width:0;' : ''}
           border-left-color:${outlineK(bg) === 0 ? 'rgba(255,255,255,0)' : leftBorder.replace(/,([\d.]+)\)$/, (m, a) => ',' + aw(0.15, (hair(0.5 * sc)[1] * outlineK(bg))) + ')')};border-bottom-color:rgba(255,255,255,${aw(0.15, (hair(0.5 * sc)[1] * outlineK(bg)))});
           border-top-color:rgba(255,255,255,${aw(0.15, (hair(0.5 * sc)[1] * outlineK(bg)))});border-right-color:rgba(255,255,255,0.0);">
-          ${splashHTML(cw, chh, bg, hero, logoImg, name, 100, layout === 'tablet', layout === 'iphone' || layout === 'android', s2v)}
+          ${(() => { window._btnSym = (layout === 'iphone' || layout === 'android'); const h = splashHTML(cw, chh, bg, hero, logoImg, name, 100, layout === 'tablet', layout === 'iphone' || layout === 'android', s2v); window._btnSym = false; return h; })()}
           <div style="position:absolute;top:0;bottom:0;left:${-join}px;width:${cw}px;pointer-events:none;z-index:9;
             background:linear-gradient(125deg,rgba(255,255,255,0.22) 0%,rgba(255,255,255,0.07) 15%,rgba(255,255,255,0) 36%);"></div>
         </div>
@@ -4158,7 +4247,7 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
                : { nl:125, nt:185, bl:121, bb:151, bfs:74 };
       overlay = `<div style="position:absolute;left:${S(T1.nl)}px;top:${S(T1.nt - (NAME_LINE_HEIGHT - 1.1) / 2 * nameFs)}px;z-index:3;text-align:left;">
           ${(() => { const ls = NAME_LETTER_SPACING;
-                     const W = wrapName(lines, nameFs, 600, ls, NAME_WRAP_LINE[layout] - T1.nl, 3, 0.7, true);
+                     const W = fitNameRule(lines, nameFs, 600, ls, T1.nl, layout);   // start size + trigger-line rule
                      return W.lines.map(l => `<div style="${PSB}font-size:${S(W.fs)}px;color:white;line-height:${NAME_LINE_HEIGHT};letter-spacing:${ls}em;text-align:left;white-space:nowrap;">${l}</div>`).join(''); })()}
         </div>
         <div style="position:absolute;left:${S(T1.bl)}px;bottom:${S(T1.bb)}px;z-index:3;
