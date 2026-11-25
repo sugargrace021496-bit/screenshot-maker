@@ -3397,14 +3397,16 @@ const FEAT_SPLASH = { left:79.3, logo:198.3, btnH:148, btnBot:209, btnMx:74.8, b
 const PHOTO_FRAME = {
   phone1:  { x:-0.340, y:-0.015, w:1.715 },   // iPhone / Android screen 1
   phone2:  { x:-0.390, y: 0.000, w:1.710 },   // iPhone / Android screen 2
+  iphone1: { x:-0.3277, y: 0.1131, w:1.700, cx:0.5223, cy:0.6188 },   // iPhone screen 1 — CrossFit Golden Bird reference (photo centre + size of its 3:4 middle)
+  iphone2: { x:-0.3750, y: 0.1256, w:1.700, cx:0.4750, cy:0.6314 },   // iPhone screen 2 — same size, shifted as in that reference
   tablet1: { x:-0.0105, y:-0.0070, w:1.0260 },   // fine-fitted to the black tablet reference
   tablet2: { x:-0.0105, y:-0.0070, w:1.0260 },   // same as screen 1: screens 1–2 join seamlessly (carousel)
   feature: { x:-0.315, y: 0.015, w:1.620 },
   qr:      { x:-0.3245, y:-0.0006, w:1.625 },  // read straight from promote.pdf
 };
 const SCREEN2_SHIFT = {
-  iphone:  { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true },
-  android: { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true },   // one phone across screens 1–2 (same as iPhone)
+  iphone:  { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true, ext:47 },   // screen-2 phone 47px wider on its left (Ranfone reference)
+  android: { px:0, py:0, ux:0, uy:0, s2:true, samePhoto:true, ext:47 },   // one phone across screens 1–2; screen-2 phone 47px wider on its left (Ranfone reference)
   tablet:  { px:0, py:0, ux:0,  uy:0, s2:true },   // carousel: nothing shifts between screens 1 and 2
 };
 // Photo shape + edge colour (cached). Wide photos (wider than tall) are shown whole, as in promote.pdf (OsiBodyFit):
@@ -3527,8 +3529,10 @@ function heroComposite(src, sw, sh, left, top, width, fill, grad) {
 function plainPlace(HM, sw, sh, tabletDevice, phone, S2) {
   const bw = HM.box.x1 - HM.box.x0, cxB = (HM.box.x0 + HM.box.x1) / 2, cyB = (HM.box.y0 + HM.box.y1) / 2;
   if (phone && !tabletDevice) {
-    const w = 0.646 * sw / bw, h = w / HM.aspect;
-    return { l: 0.524 * sw - cxB * w + S2.ux, t: 0.364 * sh - cyB * h + S2.uy, w };
+    // re-measured from the Ranfone Training Systems iPhone + Android references (logo 61% of the phone width,
+    // centred at 46.9% across and 41.4% down)
+    const w = 0.610 * sw / bw, h = w / HM.aspect;
+    return { l: 0.469 * sw - cxB * w + S2.ux, t: 0.414 * sh - cyB * h + S2.uy, w };
   }
   const tk = tabletDevice ? 0.592 : 1, w = 0.848 * tk * sw / bw, h = w / HM.aspect;
   return { l: (0.469 - 0.424 * tk) * sw - HM.box.x0 * w + S2.px, t: (0.49 * sh + 0.035 * tk * sw) - cyB * h + S2.py, w };
@@ -3587,7 +3591,7 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
   const _u = sw / (tabletDevice ? 1770 : 955);
   const S2 = s2 ? { px: s2.px*_u, py: s2.py*_u, ux: s2.ux*_u, uy: s2.uy*_u, ps: s2.ps || 1, pcx: (s2.pcx||0)*_u, pcy: (s2.pcy||0)*_u } : { px:0, py:0, ux:0, uy:0, ps:1, pcx:0, pcy:0 };
   const isS2 = !!(s2 && s2.s2);
-  const PF = iosDevice === true ? PHOTO_FRAME[(isS2 && !s2.samePhoto) ? 'phone2' : 'phone1']
+  const PF = iosDevice === true ? (window._isAndBtn ? PHOTO_FRAME[(isS2 && !s2.samePhoto) ? 'phone2' : 'phone1'] : PHOTO_FRAME[isS2 ? 'iphone2' : 'iphone1'])
            : (iosDevice === FEAT_SPLASH) ? PHOTO_FRAME.feature
            : (iosDevice === QR_SPLASH) ? PHOTO_FRAME.qr
            : tabletDevice ? PHOTO_FRAME[isS2 ? 'tablet2' : 'tablet1'] : null;
@@ -3634,7 +3638,18 @@ function splashHTML(sw, sh, bg, hero, logoImg, name, nameGroupDown, tabletDevice
   // where the photo goes (same rules as before), so it can be merged with the colour fade
   let PL = null;
   if (hero && HF && HM) {
-    { // Hero photo fills the device screen exactly as uploaded (cover, centred): fits the tablet, trimmed on the others
+    if (iosDevice === true && HM.plain) {
+      // logo / wordmark on a plain background (iPhone + Android phones): placed by the reference rule, not stretched to fill
+      PL = plainPlace(HM, sw, sh, false, true, S2);
+    } else if (iosDevice === true && !window._isAndBtn && !HM.plain && !(HM.aspect > 1)) {
+      // iPhone screens 1–2: photo size and position copied from the CrossFit Golden Bird reference
+      // placed by the photo's centre (not its top), so photos of any shape land like the reference:
+      // the photo's 3:4 middle is F.w × the phone width, centred at (F.cx, F.cy) of the phone
+      const F = PHOTO_FRAME[isS2 ? 'iphone2' : 'iphone1'];
+      const cf = HM.aspect > 0.75 ? 0.75 / HM.aspect : 1;           // share of the photo's width that is its 3:4 middle
+      const wd = F.w * sw / cf, ht = wd / HM.aspect;
+      PL = { l: F.cx * sw - wd / 2 + S2.px, t: F.cy * sh - ht / 2 + S2.py, w: wd };
+    } else { // Hero photo fills the device screen exactly as uploaded (cover, centred): fits the tablet, trimmed on the others
       const cw2 = Math.max(sw, sh * HM.aspect);
       PL = { l: (sw - cw2) / 2 + S2.px, t: (sh - cw2 / HM.aspect) / 2 + S2.py, w: cw2 }; }
   }
@@ -4198,15 +4213,16 @@ function buildHTML(layout, sc, pw, ph, screenOverride) {
     // Screens 1–2: panorama hero — one tilted glossy phone across both panels.
     // iOS geometry pixel-measured from 2.png/3.png; Android tuned for the 1242×2208 canvas.
     // Combined 2484-wide canvas (2 × 1242); screen 2 is shifted left by one panel.
-    const HG = ({ iphone:{PW:955,mul:2140/955,RAD:56,TILT:30,PCX:1422,PCY:1351},   // iOS measured from approved phone.6.5-1/2
-                  android:{PW:823.7,mul:2140/955,RAD:54.1,TILT:30,PCX:1422,PCY:1109.8},   // Android measured from approved phone.5.5-1/2
+    const HG = ({ iphone:{PW:955,mul:2140/955,RAD:56,TILT:30,PCX:1319.3,PCY:1351},   // iPhone: one continuous phone, measured from the CrossFit Golden Bird reference
+                  android:{PW:955,mul:2140/955,RAD:56,TILT:30,PCX:1448.6,PCY:1102},   // Android: size/position from the approved phone.5.5-1/2 (matches the Ranfone reference)
                   tablet:{PW:1763,mul:2380/1763,RAD:64,TILT:30,PCX:2262.7,PCY:1438.8} })[layout];
     const PW = HG.PW, PH = Math.round(HG.PW * HG.mul), RAD = S(HG.RAD), TILT = HG.TILT;
     const PCX = HG.PCX, PCY = HG.PCY;             // device center (combined space)
     // Use the platform being rendered, not the currently selected UI tab. This keeps JPG 1–2 perfectly aligned in direct and ZIP exports.
     // Tablet: screen 2 continues as if the gap between the screenshots (12px at 172px wide in the gallery
     // ≈ 143px at full size) were part of the picture, so the tablet reads as one continuous image across the gap.
-    const SEAM_GAP = { tablet: 158, iphone: 120, android: 120 };   // A: screen-2 phone a little lower so the cut looks straighter   // measured: preview gap 12px at 95.6px (phones) / 155.2px (tablet) wide   // Android screen-2 phone 10px left of iPhone's setting   // iPhone: screen-2 phone moved 40px right (approved)   // iPhone: 12px at 106px wide in the gallery
+    const SEAM_GAP = { tablet: 158, iphone: 0, android: 0 };   // iPhone + Android: no gap — the phone runs edge to edge across screens 1–2 (references)
+    //   // A: screen-2 phone a little lower so the cut looks straighter   // measured: preview gap 12px at 95.6px (phones) / 155.2px (tablet) wide   // Android screen-2 phone 10px left of iPhone's setting   // iPhone: screen-2 phone moved 40px right (approved)   // iPhone: 12px at 106px wide in the gallery
     const off = (screen === 2) ? SIZES[layout].w + (SEAM_GAP[layout] || 0) : 0;
     const pl = S(PCX - PW / 2 - off), pt = S(PCY - PH / 2), cw = S(PW), chh = S(PH);
     // where the phone leaves screen 1 — long names inside the phone wrap before that edge
